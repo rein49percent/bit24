@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
-import { MessageSquare, Cloud, TrendingUp, Menu, X } from 'lucide-react';
+import { MessageSquare, Cloud, TrendingUp, Menu, X, User as UserIcon, Crown } from 'lucide-react';
 import ChatInterface from './components/ChatInterface';
 import WeatherPanel from './components/WeatherPanel';
 import MarketPanel from './components/MarketPanel';
 import Sidebar from './components/Sidebar';
+import LanguageSwitcher from './components/LanguageSwitcher';
+import UserProfile from './components/UserProfile';
+import SubscriptionPage from './components/SubscriptionPage';
 import {
   createConversation,
   getConversations,
@@ -11,21 +14,38 @@ import {
   Conversation,
 } from './services/chatService';
 import { supabase } from './lib/supabase';
+import { useAuth } from './contexts/AuthContext';
+import { useLanguage } from './contexts/LanguageContext';
+import { getUserSubscription, Subscription } from './services/authService';
 
-type Tab = 'chat' | 'weather' | 'market';
+type Tab = 'chat' | 'weather' | 'market' | 'subscription';
 
 function App() {
+  const { user } = useAuth();
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
 
   useEffect(() => {
     loadConversations();
-  }, []);
+    if (user) {
+      loadSubscription();
+    }
+  }, [user]);
+
+  const loadSubscription = async () => {
+    if (!user) return;
+    const sub = await getUserSubscription(user.id);
+    setSubscription(sub);
+  };
 
   const loadConversations = async () => {
-    const data = await getConversations();
+    if (!user) return;
+    const data = await getConversations(user.id);
     setConversations(data);
 
     if (data.length > 0 && !activeConversationId) {
@@ -34,7 +54,8 @@ function App() {
   };
 
   const handleNewConversation = async () => {
-    const newConv = await createConversation();
+    if (!user) return;
+    const newConv = await createConversation(user.id, user.language_preference);
     if (newConv) {
       setConversations([newConv, ...conversations]);
       setActiveConversationId(newConv.id);
@@ -100,9 +121,19 @@ function App() {
               </button>
               <div className="text-3xl">🌾</div>
               <div>
-                <h1 className="text-2xl font-bold">Yaung Chi</h1>
-                <p className="text-xs text-green-100">AI Agriculture Assistant</p>
+                <h1 className="text-2xl font-bold">{t.appName}</h1>
+                <p className="text-xs text-green-100">{t.appTagline}</p>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <LanguageSwitcher />
+              <button
+                onClick={() => setShowProfile(true)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-green-500 transition-colors text-white"
+              >
+                {subscription?.tier === 'paid' && <Crown className="w-4 h-4 text-yellow-300" />}
+                <UserIcon className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
@@ -121,7 +152,7 @@ function App() {
               }`}
             >
               <MessageSquare className="w-4 h-4" />
-              <span className="text-sm">Chat</span>
+              <span className="text-sm">{t.nav.chat}</span>
             </button>
             <button
               onClick={() => setActiveTab('weather')}
@@ -132,7 +163,7 @@ function App() {
               }`}
             >
               <Cloud className="w-4 h-4" />
-              <span className="text-sm">Weather</span>
+              <span className="text-sm">{t.nav.weather}</span>
             </button>
             <button
               onClick={() => setActiveTab('market')}
@@ -143,7 +174,18 @@ function App() {
               }`}
             >
               <TrendingUp className="w-4 h-4" />
-              <span className="text-sm">Market Prices</span>
+              <span className="text-sm">{t.nav.marketPrices}</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('subscription')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                activeTab === 'subscription'
+                  ? 'bg-white text-green-700 font-semibold'
+                  : 'text-white hover:bg-green-500'
+              }`}
+            >
+              <Crown className="w-4 h-4" />
+              <span className="text-sm">{t.nav.subscription}</span>
             </button>
           </nav>
         </div>
@@ -181,13 +223,13 @@ function App() {
                 <div className="h-full flex items-center justify-center">
                   <div className="text-center">
                     <div className="text-6xl mb-4">🌾</div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Yaung Chi</h2>
-                    <p className="text-gray-600 mb-6">Start a new conversation to begin</p>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">{t.chat.welcome}</h2>
+                    <p className="text-gray-600 mb-6">{t.chat.welcomeMessage}</p>
                     <button
                       onClick={handleNewConversation}
                       className="px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-colors font-medium"
                     >
-                      Start New Chat
+                      {t.chat.startNewChat}
                     </button>
                   </div>
                 </div>
@@ -196,8 +238,11 @@ function App() {
           )}
           {activeTab === 'weather' && <WeatherPanel />}
           {activeTab === 'market' && <MarketPanel />}
+          {activeTab === 'subscription' && <SubscriptionPage />}
         </main>
       </div>
+
+      {showProfile && <UserProfile onClose={() => setShowProfile(false)} />}
     </div>
   );
 }

@@ -20,22 +20,12 @@ export interface Conversation {
   updated_at: string;
 }
 
-export const generateUserId = (): string => {
-  const stored = localStorage.getItem('yaung_chi_user_id');
-  if (stored) return stored;
-
-  const newId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  localStorage.setItem('yaung_chi_user_id', newId);
-  return newId;
-};
-
-export const createConversation = async (language: string = 'en'): Promise<Conversation | null> => {
-  const userId = generateUserId();
-
+export const createConversation = async (userId: string, language: string = 'en'): Promise<Conversation | null> => {
   const { data, error } = await supabase
     .from('conversations')
     .insert({
       user_id: userId,
+      user_id_fk: userId,
       title: 'New Conversation',
       language,
     })
@@ -50,13 +40,12 @@ export const createConversation = async (language: string = 'en'): Promise<Conve
   return data;
 };
 
-export const getConversations = async (): Promise<Conversation[]> => {
-  const userId = generateUserId();
+export const getConversations = async (userId: string): Promise<Conversation[]> => {
 
   const { data, error } = await supabase
     .from('conversations')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id_fk', userId)
     .order('updated_at', { ascending: false });
 
   if (error) {
@@ -116,14 +105,25 @@ export const sendMessage = async (
 export const generateAIResponse = async (
   conversationId: string,
   userMessage: string,
-  context?: { hasImage?: boolean; language?: string }
+  context?: { hasImage?: boolean; language?: string; isPaidUser?: boolean }
 ): Promise<Message | null> => {
   let responseContent = '';
 
   const lowerMessage = userMessage.toLowerCase();
+  const isPaid = context?.isPaidUser || false;
 
   if (lowerMessage.includes('disease') || lowerMessage.includes('spot') || lowerMessage.includes('leaf') || lowerMessage.includes('rot') || context?.hasImage) {
-    responseContent = `Based on your query about crop diseases, here are some insights:
+    if (!isPaid) {
+      responseContent = `I can help with crop diseases. Common issues include leaf spots, root rot, and powdery mildew. These are often caused by fungi or bacteria.
+
+General advice:
+- Remove affected plant parts
+- Use appropriate fungicides
+- Ensure good air circulation
+
+💎 Upgrade to Premium for detailed diagnosis, specific treatment plans, and image-based analysis.`;
+    } else {
+      responseContent = `Based on your query about crop diseases, here are some insights:
 
 🌾 **Common Crop Diseases & Solutions:**
 
@@ -143,6 +143,7 @@ export const generateAIResponse = async (
    - Prevention: Plant in sunny locations, avoid overhead watering
 
 ${context?.hasImage ? '\n💡 **Tip:** Based on your image, look for discoloration, spots, or unusual growth patterns. If symptoms persist, consult local agricultural extension services.' : ''}`;
+    }
   } else if (lowerMessage.includes('pest') || lowerMessage.includes('insect') || lowerMessage.includes('bug') || lowerMessage.includes('caterpillar')) {
     responseContent = `Here's information about pest control:
 
