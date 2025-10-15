@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { generateGeminiResponse, isGeminiConfigured } from './geminiService';
 
 export interface Message {
   id: string;
@@ -105,16 +106,72 @@ export const sendMessage = async (
 export const generateAIResponse = async (
   conversationId: string,
   userMessage: string,
-  context?: { hasImage?: boolean; language?: string; isPaidUser?: boolean }
+  context?: { hasImage?: boolean; language?: string; isPaidUser?: boolean; imageData?: string }
 ): Promise<Message | null> => {
   let responseContent = '';
 
   const lowerMessage = userMessage.toLowerCase();
   const isPaid = context?.isPaidUser || false;
 
-  if (lowerMessage.includes('disease') || lowerMessage.includes('spot') || lowerMessage.includes('leaf') || lowerMessage.includes('rot') || context?.hasImage) {
+  if (isGeminiConfigured()) {
+    try {
+      const messages = await getMessages(conversationId);
+      const conversationHistory = messages.slice(-10).map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      const geminiResponse = await generateGeminiResponse(userMessage, {
+        conversationHistory,
+        imageData: context?.imageData,
+        isPaidUser: isPaid,
+        language: context?.language,
+      });
+
+      if (geminiResponse) {
+        responseContent = geminiResponse;
+      } else {
+        responseContent = getFallbackResponse(lowerMessage, isPaid, context?.hasImage);
+      }
+    } catch (error) {
+      console.error('Error generating Gemini response:', error);
+      responseContent = getFallbackResponse(lowerMessage, isPaid, context?.hasImage);
+    }
+  } else {
+    responseContent = getFallbackResponse(lowerMessage, isPaid, context?.hasImage);
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: responseContent,
+    })
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error creating AI response:', error);
+    return null;
+  }
+
+  await supabase
+    .from('query_analytics')
+    .insert({
+      query_type: detectQueryType(userMessage),
+      language: context?.language || 'en',
+      success: true,
+      response_time: Math.random() * 1000 + 500,
+    });
+
+  return data;
+};
+
+const getFallbackResponse = (lowerMessage: string, isPaid: boolean, hasImage?: boolean): string => {
+  if (lowerMessage.includes('disease') || lowerMessage.includes('spot') || lowerMessage.includes('leaf') || lowerMessage.includes('rot') || hasImage) {
     if (!isPaid) {
-      responseContent = `I can help with crop diseases. Common issues include leaf spots, root rot, and powdery mildew. These are often caused by fungi or bacteria.
+      return `I can help with crop diseases. Common issues include leaf spots, root rot, and powdery mildew. These are often caused by fungi or bacteria.
 
 General advice:
 - Remove affected plant parts
@@ -123,7 +180,7 @@ General advice:
 
 💎 Upgrade to Premium for detailed diagnosis, specific treatment plans, and image-based analysis.`;
     } else {
-      responseContent = `Based on your query about crop diseases, here are some insights:
+      return `Based on your query about crop diseases, here are some insights:
 
 🌾 **Common Crop Diseases & Solutions:**
 
@@ -142,10 +199,10 @@ General advice:
    - Solution: Spray with sulfur or potassium bicarbonate solution
    - Prevention: Plant in sunny locations, avoid overhead watering
 
-${context?.hasImage ? '\n💡 **Tip:** Based on your image, look for discoloration, spots, or unusual growth patterns. If symptoms persist, consult local agricultural extension services.' : ''}`;
+${hasImage ? '\n💡 **Tip:** Based on your image, look for discoloration, spots, or unusual growth patterns. If symptoms persist, consult local agricultural extension services.' : ''}`;
     }
   } else if (lowerMessage.includes('pest') || lowerMessage.includes('insect') || lowerMessage.includes('bug') || lowerMessage.includes('caterpillar')) {
-    responseContent = `Here's information about pest control:
+    return `Here's information about pest control:
 
 🐛 **Common Pests & Control Methods:**
 
@@ -166,7 +223,7 @@ ${context?.hasImage ? '\n💡 **Tip:** Based on your image, look for discolorati
 
 **🌿 Organic Solutions:** Encourage beneficial insects, use companion planting (marigolds, basil), maintain healthy soil.`;
   } else if (lowerMessage.includes('fertilizer') || lowerMessage.includes('nutrition') || lowerMessage.includes('npk') || lowerMessage.includes('compost')) {
-    responseContent = `Let me help you with fertilizer recommendations:
+    return `Let me help you with fertilizer recommendations:
 
 🌱 **Fertilizer Guide:**
 
@@ -195,7 +252,7 @@ ${context?.hasImage ? '\n💡 **Tip:** Based on your image, look for discolorati
 
 **⚠️ Important:** Always test soil before heavy fertilization to avoid nutrient imbalance.`;
   } else if (lowerMessage.includes('weather') || lowerMessage.includes('rain') || lowerMessage.includes('temperature') || lowerMessage.includes('climate')) {
-    responseContent = `Weather information is crucial for farming decisions:
+    return `Weather information is crucial for farming decisions:
 
 🌤️ **Weather Tips for Farmers:**
 
@@ -218,7 +275,7 @@ ${context?.hasImage ? '\n💡 **Tip:** Based on your image, look for discolorati
 
 Would you like specific advice for your crop or region?`;
   } else if (lowerMessage.includes('price') || lowerMessage.includes('market') || lowerMessage.includes('sell') || lowerMessage.includes('cost')) {
-    responseContent = `Market price information helps you make informed selling decisions:
+    return `Market price information helps you make informed selling decisions:
 
 💰 **Market Price Guide:**
 
@@ -240,7 +297,7 @@ Would you like specific advice for your crop or region?`;
 
 For specific current prices, check the Market Prices section in the app!`;
   } else if (lowerMessage.includes('water') || lowerMessage.includes('irrigation') || lowerMessage.includes('drought')) {
-    responseContent = `Water management advice:
+    return `Water management advice:
 
 💧 **Irrigation Best Practices:**
 
@@ -267,7 +324,7 @@ For specific current prices, check the Market Prices section in the app!`;
 - Slow growth
 - Fruit drop`;
   } else if (lowerMessage.includes('soil') || lowerMessage.includes('ph') || lowerMessage.includes('acidity')) {
-    responseContent = `Soil health information:
+    return `Soil health information:
 
 🌍 **Soil Management:**
 
@@ -295,7 +352,7 @@ For specific current prices, check the Market Prices section in the app!`;
 - Active earthworm population
 - Crumbly texture`;
   } else {
-    responseContent = `Hello! I'm Yaung Chi, your agriculture assistant. I can help you with:
+    return `Hello! I'm Yaung Chi, your agriculture assistant. I can help you with:
 
 🌾 **Crop Diseases:** Identify and treat plant diseases
 🐛 **Pest Control:** Solutions for insect problems
@@ -312,32 +369,6 @@ For specific current prices, check the Market Prices section in the app!`;
 
 What would you like to know about your farm today?`;
   }
-
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      role: 'assistant',
-      content: responseContent,
-    })
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    console.error('Error creating AI response:', error);
-    return null;
-  }
-
-  await supabase
-    .from('query_analytics')
-    .insert({
-      query_type: detectQueryType(userMessage),
-      language: context?.language || 'en',
-      success: true,
-      response_time: Math.random() * 1000 + 500,
-    });
-
-  return data;
 };
 
 const detectQueryType = (message: string): string => {

@@ -68,6 +68,7 @@ export default function ChatInterface({ conversationId }: ChatInterfaceProps) {
 
       const aiResponse = await generateAIResponse(conversationId, messageText, {
         hasImage: !!imagePreview,
+        imageData: imagePreview || undefined,
         language: 'en',
       });
 
