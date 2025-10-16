@@ -114,12 +114,20 @@ export const generateAIResponse = async (
   const isPaid = context?.isPaidUser || false;
 
   if (isGeminiConfigured()) {
+    console.log('Gemini is configured, attempting to generate AI response...');
     try {
       const messages = await getMessages(conversationId);
       const conversationHistory = messages.slice(-10).map(msg => ({
         role: msg.role,
         content: msg.content,
       }));
+
+      console.log('Calling Gemini API with context:', {
+        messageLength: userMessage.length,
+        historyLength: conversationHistory.length,
+        hasImage: !!context?.imageData,
+        isPaid,
+      });
 
       const geminiResponse = await generateGeminiResponse(userMessage, {
         conversationHistory,
@@ -129,8 +137,10 @@ export const generateAIResponse = async (
       });
 
       if (geminiResponse) {
+        console.log('Received Gemini response successfully');
         responseContent = geminiResponse;
       } else {
+        console.warn('Gemini returned null, using fallback response');
         responseContent = getFallbackResponse(lowerMessage, isPaid, context?.hasImage);
       }
     } catch (error) {
@@ -138,6 +148,7 @@ export const generateAIResponse = async (
       responseContent = getFallbackResponse(lowerMessage, isPaid, context?.hasImage);
     }
   } else {
+    console.log('Gemini not configured, using fallback responses');
     responseContent = getFallbackResponse(lowerMessage, isPaid, context?.hasImage);
   }
 

@@ -36,7 +36,9 @@ export const initializeGemini = (): boolean => {
   }
 
   try {
+    console.log('Initializing Gemini API...');
     genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    console.log('Gemini API initialized successfully');
     return true;
   } catch (error) {
     console.error('Failed to initialize Gemini API:', error);
@@ -64,6 +66,8 @@ export const generateGeminiResponse = async (
   }
 
   try {
+    console.log('Generating Gemini response for:', userMessage.substring(0, 50));
+
     const {
       conversationHistory = [],
       imageData,
@@ -72,36 +76,16 @@ export const generateGeminiResponse = async (
     } = options;
 
     const modelName = imageData ? 'gemini-1.5-flash' : 'gemini-1.5-flash';
+    console.log('Using model:', modelName);
+
     const model = genAI!.getGenerativeModel({
       model: modelName,
-      generationConfig: {
-        temperature,
-        maxOutputTokens: isPaidUser ? 2048 : 1024,
-      },
     });
-
-    const history = conversationHistory.slice(-10).map(msg => ({
-      role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: msg.content }],
-    }));
-
-    const chat = model.startChat({
-      history,
-      generationConfig: {
-        temperature,
-        maxOutputTokens: isPaidUser ? 2048 : 1024,
-      },
-    });
-
-    let prompt = `${AGRICULTURE_SYSTEM_PROMPT}\n\nUser Question: ${userMessage}`;
-
-    if (!isPaidUser) {
-      prompt += '\n\n(Note: Provide a helpful but concise response. For detailed analysis, suggest premium features.)';
-    }
 
     let result;
 
     if (imageData) {
+      console.log('Processing image analysis request');
       const imageParts = [{
         inlineData: {
           data: imageData.split(',')[1],
@@ -113,22 +97,50 @@ export const generateGeminiResponse = async (
 
       result = await model.generateContent([visionPrompt, ...imageParts]);
     } else {
+      console.log('Processing text request with history length:', conversationHistory.length);
+
+      const history = conversationHistory.slice(-10).map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      }));
+
+      const chat = model.startChat({
+        history,
+        generationConfig: {
+          temperature,
+          maxOutputTokens: isPaidUser ? 2048 : 1024,
+        },
+      });
+
+      let prompt = `${AGRICULTURE_SYSTEM_PROMPT}\n\nUser Question: ${userMessage}`;
+
+      if (!isPaidUser) {
+        prompt += '\n\n(Note: Provide a helpful but concise response. For detailed analysis, suggest premium features.)';
+      }
+
       result = await chat.sendMessage(prompt);
     }
 
+    console.log('Gemini API call successful, parsing response...');
     const response = await result.response;
     const text = response.text();
 
     if (!text || text.trim().length === 0) {
+      console.error('Received empty response from Gemini');
       throw new Error('Empty response from Gemini API');
     }
 
+    console.log('Generated response length:', text.length);
     return text;
   } catch (error) {
     console.error('Error calling Gemini API:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
 
     if (error instanceof Error) {
-      if (error.message.includes('API key')) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+
+      if (error.message.includes('API key') || error.message.includes('API_KEY')) {
         console.error('Invalid API key. Please check your Gemini API key configuration.');
       } else if (error.message.includes('quota')) {
         console.error('API quota exceeded. Please check your Gemini API usage.');
